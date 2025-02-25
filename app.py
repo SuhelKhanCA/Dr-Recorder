@@ -27,11 +27,14 @@ app.config['CACHE_TYPE'] = 'simple'  # You can use 'redis', 'memcached', etc.
 cache = Cache(app)
 
 # Google Drive API settings
-SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = "drivecloud-425512-1a0a2c4ec5d0.json"
-PARENT_FOLDER_ID = "1rj8Hd1ckkhdVeRjwPhlyZ-9IqQnVnT94"
+SCOPES = ''
+SERVICE_ACCOUNT_FILE = ""
+PARENT_FOLDER_ID = ""
 
 def init_db():
+    """
+    Initialize the database and create the 'users' table if it does not exist.
+    """
     with sqlite3.connect('database.db') as conn:
         c = conn.cursor()
         c.execute('''
@@ -53,10 +56,23 @@ def init_db():
         conn.commit()
 
 def authenticate():
+    """
+    Authenticate with Google Drive API using service account credentials.
+    """
     return service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 
 @cache.memoize(timeout=300)  # Cache for 5 minutes
 def upload_to_drive(file_path, filename):
+    """
+    Upload a file to Google Drive.
+    
+    Args:
+        file_path (str): Path to the file to be uploaded.
+        filename (str): Name of the file to be uploaded.
+    
+    Returns:
+        str: ID of the uploaded file.
+    """
     creds = authenticate()
     service = build('drive', 'v3', credentials=creds)
     file_metadata = {'name': filename, 'parents': [PARENT_FOLDER_ID]}
@@ -65,25 +81,48 @@ def upload_to_drive(file_path, filename):
     return file.get('id')
 
 def get_db_connection():
+    """
+    Get a connection to the SQLite database.
+    
+    Returns:
+        sqlite3.Connection: SQLite database connection.
+    """
     conn = sqlite3.connect('database.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 def generate_short_id():
+    """
+    Generate a short unique ID.
+    
+    Returns:
+        str: Short unique ID.
+    """
     return base64.urlsafe_b64encode(uuid.uuid4().bytes).decode('utf-8')[:6]
 
 @app.route('/')
 def welcome():
+    """
+    Render the welcome page.
+    
+    Returns:
+        str: Rendered welcome page.
+    """
     return render_template('welcome.html')
 
 df = pd.read_excel('Book1.xlsx')
 
 @app.route('/index')
 def index():
+    """
+    Render the index page with a random text sample.
+    
+    Returns:
+        str: Rendered index page.
+    """
     if 'user_id' not in session:
         return redirect(url_for('login'))
     
-    # Choose a random row from preloaded data
     random_row = df.sample().iloc[0]
     text_id = random_row['Sno']
     english_text = random_row['English']
@@ -93,6 +132,12 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """
+    Handle file upload and process audio files.
+    
+    Returns:
+        str: Redirect to index page.
+    """
     user_name = session.get('user_name')
     user_id = session.get('user_id')
     text_id = request.form.get('text_id')
@@ -109,7 +154,6 @@ def upload_file():
     english_filename = f"{user_name}_ENG_{text_id}_{timestamp}.wav"
     english_path = os.path.join(app.config['RECORD_FOLDER'], english_filename)
 
-    # Adjust audio properties using pydub
     try:
         english_audio = AudioSegment.from_file(english_file)
         english_audio = english_audio.set_frame_rate(44100)  # Sample Rate: 44.1 kHz
@@ -125,7 +169,6 @@ def upload_file():
     hindi_filename = f"{user_name}_HIND_{text_id}_{timestamp}.wav"
     hindi_path = os.path.join(app.config['RECORD_FOLDER'], hindi_filename)
 
-    # Adjust audio properties using pydub
     try:
         hindi_audio = AudioSegment.from_file(hindi_file)
         hindi_audio = hindi_audio.set_frame_rate(44100)    # Sample Rate: 44.1 kHz
@@ -149,16 +192,20 @@ def upload_file():
     return redirect(url_for('index'))
 
 def upload_database_to_drive():
+    """
+    Upload the SQLite database to Google Drive.
+    
+    Returns:
+        bool: True if upload is successful, False otherwise.
+    """
     db_path = os.path.join(app.root_path, 'database.db')
     db_filename = 'database.db'
 
     try:
-        # Check if the database file exists
         if not os.path.exists(db_path):
             flash("Database file not found", "error")
             return False
 
-        # Upload the database to Google Drive
         db_file_id = upload_to_drive(db_path, db_filename)
         
         return True
@@ -169,6 +216,12 @@ def upload_database_to_drive():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    """
+    Handle user registration.
+    
+    Returns:
+        str: Rendered register page or redirect to login page.
+    """
     if request.method == 'POST':
         username = request.form['username']
         full_name = request.form['full_name']
@@ -207,7 +260,6 @@ def register():
             conn.commit()
             flash("User registered successfully", "success")
 
-            # Upload database to Google Drive after successful registration
             upload_database_to_drive()
 
             return redirect(url_for('login'))
@@ -219,6 +271,12 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """
+    Handle user login.
+    
+    Returns:
+        str: Rendered login page or redirect to index page.
+    """
     if request.method == 'POST':
         if session.get('login_in_progress'):
             flash("Login already in progress, please wait...", "error")
@@ -251,12 +309,24 @@ def login():
 
 @app.route('/logout')
 def logout():
+    """
+    Handle user logout.
+    
+    Returns:
+        str: Redirect to login page.
+    """
     session.clear()
     flash("Logged out successfully", "success")
     return redirect(url_for('login'))
 
 @app.route('/upload-db-to-drive', methods=['GET'])
 def upload_db_to_drive_route():
+    """
+    Route to upload the database to Google Drive.
+    
+    Returns:
+        str: Redirect to index page.
+    """
     if upload_database_to_drive():
         return redirect(url_for('index'))
     return redirect(url_for('index'))
